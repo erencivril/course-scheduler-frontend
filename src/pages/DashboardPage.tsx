@@ -112,19 +112,17 @@ const TermManagementStep: React.FC<{
             <th>Name</th>
             <th>Start Date</th>
             <th>End Date</th>
-            <th>Active</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {terms.length === 0 ? (
-            <tr><td colSpan={5} style={{ textAlign: "center", color: "#888" }}>No terms found.</td></tr>
+            <tr><td colSpan={4} style={{ textAlign: "center", color: "#888" }}>No terms found.</td></tr>
           ) : terms.map(term => (
             <tr key={term._id} style={{ background: term._id === selectedTermId ? "#ffe5b4" : undefined }}>
               <td>{term.name}</td>
               <td>{term.startDate.slice(0, 10)}</td>
               <td>{term.endDate.slice(0, 10)}</td>
-              <td>{term.isActive ? "Yes" : "No"}</td>
               <td>
                 <button onClick={() => onSelect(term._id)} style={{ marginRight: 8 }}>
                   {term._id === selectedTermId ? "Selected" : "Select"}
@@ -212,7 +210,9 @@ const DashboardPage: React.FC = () => {
   const [excelUploadError, setExcelUploadError] = useState<string | null>(null);
   const [excelUploading, setExcelUploading] = useState(false);
   const [defaultCapacity, setDefaultCapacity] = useState<number>(45);
-  const [selectedCalendarYear, setSelectedCalendarYear] = useState<string>(""); // "" for All Years
+  const [selectedCalendarYear, setSelectedCalendarYear] = useState<string>("1");
+  const [calendarSections, setCalendarSections] = useState<any[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
   
   // Data for populating details
   const [courses, setCourses] = useState<any[]>([]); // Contains courseCode, name, _id, and hopefully yearLevel
@@ -263,104 +263,7 @@ const DashboardPage: React.FC = () => {
       });
   }, []);
 
-  // Prepare sectionMap for CalendarStep
-  const preparedSectionMap = useMemo<SectionMap | null>(() => {
-    console.log("Data for preparedSectionMap (fullSectionsDetails):", JSON.stringify(fullSectionsDetails, null, 2));
-    if (!fullSectionsDetails) { 
-      return null;
-    }
-
-    const map: SectionMap = {};
-    const usersArray = allUsers || []; 
-    const classroomsArray = allClassrooms || []; 
-
-    for (const detail of fullSectionsDetails) {
-      // Since detail.course is now an object (populated by backend or fetchSectionsByTerm)
-      const courseFromSection = detail.course; 
-
-      map[detail._id] = {
-        _id: detail._id,
-        course: {
-          courseCode: courseFromSection?.courseCode || 'N/A',
-          name: courseFromSection?.name || 'N/A',
-        },
-        sectionNumber: detail.sectionNumber,
-        lecturers: detail.assignedLecturers
-          .map(lecturerId => usersArray.find(u => u._id === lecturerId)?.name)
-          .filter(Boolean)
-          .join(', ') || (usersArray.length === 0 ? "N/A (Users not loaded)" : "N/A"),
-        detailedSessions: detail.sessions.map(sess => ({
-          sessionId: sess._id,
-          lessonType: sess.lessonType,
-          days: sess.days,
-          timeSlots: sess.timeSlots,
-          classroomName: classroomsArray.find(cr => cr._id === sess.classroom)?.name || (classroomsArray.length === 0 ? "N/A (Rooms not loaded)" : "N/A"),
-        })),
-        // Use yearLevel or year from the populated course object within the section detail
-        yearLevel: courseFromSection?.yearLevel ?? courseFromSection?.year, 
-      };
-    }
-    console.log("Prepared Section Map for Calendar:", JSON.stringify(map, null, 2));
-    return map;
-  }, [fullSectionsDetails, allUsers, allClassrooms]);
-
-  // Filter data for CalendarStep based on selectedCalendarYear
-  const filteredDataForCalendar = useMemo(() => {
-    if (!fullSectionsDetails || !preparedSectionMap) {
-      return { filteredSchedule: null, filteredMap: null };
-    }
-
-    if (!selectedCalendarYear || selectedCalendarYear === "") { // "All Years"
-      return { filteredSchedule: fullSectionsDetails, filteredMap: preparedSectionMap };
-    }
-
-    const yearToFilter = parseInt(selectedCalendarYear, 10);
-    const newFilteredMap: SectionMap = {};
-    const allowedSectionIds = new Set<string>();
-
-    for (const sectionId in preparedSectionMap) {
-      const sectionEntry = preparedSectionMap[sectionId];
-      // Log the values being compared for filtering
-      console.log(
-        `Filtering Check: sectionId=${sectionId}, sectionYear=${sectionEntry.yearLevel} (type: ${typeof sectionEntry.yearLevel}), filterYear=${yearToFilter} (type: ${typeof yearToFilter})`
-      );
-      if (sectionEntry.yearLevel === yearToFilter) {
-        newFilteredMap[sectionId] = sectionEntry;
-        allowedSectionIds.add(sectionId);
-      }
-    }
-
-    const newFilteredScheduleAssignments = fullSectionsDetails.filter(detail =>
-      allowedSectionIds.has(detail._id)
-    );
-
-    return {
-      filteredSchedule: { schedule: newFilteredScheduleAssignments },
-      filteredMap: newFilteredMap,
-    };
-  }, [fullSectionsDetails, preparedSectionMap, selectedCalendarYear]);
-
-  // Excel file upload (raw file to backend)
-  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedTermId) return;
-    setExcelUploading(true);
-    setExcelUploadResult(null);
-    setExcelUploadError(null);
-    setTermError(null);
-    try {
-      const result = await postLoadSections(file, selectedTermId); // service call
-      setExcelUploadResult(result);
-      setStep("select"); // Move to next step
-    } catch (err: any) {
-      setExcelUploadError(err.message || "Failed to upload Excel file");
-    } finally {
-      setExcelUploading(false);
-    }
-  };
-
-  // Course selection submit (Step 2)
-  // This function is called by both the original SE course submit and the new all courses submit button
+  // Refactor: After course selection, just go to calendar step (do not fetch section details by ID)
   const handleCourseAvailabilitySubmit = async () => {
     setSelectSubmitting(true);
     setSelectError(null);
@@ -394,40 +297,81 @@ const DashboardPage: React.FC = () => {
         defaultCapacity,
       };
 
-      // 1. Post the courses explicitly selected in the UI (e.g., SE courses)
-      const bulkResponse = await postBulkSchedule(dto);
-      // Extract section IDs from the schedule array in the response
-      const sectionIds = Array.isArray(bulkResponse.schedule)
-        ? bulkResponse.schedule.map((s: any) => s.sectionId)
-        : [];
-      if (!Array.isArray(sectionIds) || sectionIds.length === 0) {
-        setSelectError("No sections returned from bulk schedule API.");
-        setSelectSubmitting(false);
-        setTermLoading(false);
-        return;
-      }
-      // 2. Fetch each section by ID
-      const sectionDetails = await Promise.all(
-        sectionIds.map((id: string) => fetchSectionById(id))
-      );
-      // 3. Filter to only those with sessions.length > 0
-      const sectionsWithSessions = sectionDetails.filter(
-        (section: any) => Array.isArray(section.sessions) && section.sessions.length > 0
-      );
-      setFullSectionsDetails(sectionsWithSessions);
-      setStep("calendar");
+      await postBulkSchedule(dto); // Only create sections, don't use response for fetching
+      setStep("calendar"); // Go to calendar step
     } catch (err: any) {
       setSelectError(
         typeof err === "object" && err && "message" in err
           ? (err.message as string)
-          : "Failed to generate schedule or fetch section details."
+          : "Failed to generate schedule."
       );
     } finally {
       setSelectSubmitting(false);
       setTermLoading(false);
     }
   };
-  
+
+  // Fetch sections for the selected year and term when in calendar step
+  useEffect(() => {
+    if (step === "calendar" && selectedTermId && selectedCalendarYear) {
+      setCalendarLoading(true);
+      fetchSectionsByTermAndYearLevel(selectedTermId, Number(selectedCalendarYear))
+        .then(sections => {
+          setCalendarSections(sections.filter((s: any) => Array.isArray(s.sessions) && s.sessions.length > 0));
+        })
+        .catch(() => setCalendarSections([]))
+        .finally(() => setCalendarLoading(false));
+    } else if (step === "calendar") {
+      setCalendarSections([]); // No year selected
+    }
+  }, [step, selectedTermId, selectedCalendarYear]);
+
+  // Build sectionMap for CalendarStep
+  const preparedSectionMap = useMemo(() => {
+    if (!calendarSections) return null;
+    const map: SectionMap = {};
+    for (const detail of calendarSections) {
+      const courseFromSection = detail.course;
+      map[detail._id] = {
+        _id: detail._id,
+        course: {
+          courseCode: courseFromSection?.courseCode || 'N/A',
+          name: courseFromSection?.name || 'N/A',
+        },
+        sectionNumber: detail.sectionNumber,
+        lecturers: (detail.assignedLecturers || []).join(', '),
+        detailedSessions: (detail.sessions || []).map((sess: any) => ({
+          sessionId: sess._id,
+          lessonType: sess.lessonType,
+          days: sess.days,
+          timeSlots: sess.timeSlots,
+          classroomName: sess.classroom || 'N/A',
+        })),
+        yearLevel: courseFromSection?.yearLevel ?? courseFromSection?.year,
+      };
+    }
+    return map;
+  }, [calendarSections]);
+
+  // Excel file upload (raw file to backend)
+  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedTermId) return;
+    setExcelUploading(true);
+    setExcelUploadResult(null);
+    setExcelUploadError(null);
+    setTermError(null);
+    try {
+      const result = await postLoadSections(file, selectedTermId); // service call
+      setExcelUploadResult(result);
+      setStep("select"); // Move to next step
+    } catch (err: any) {
+      setExcelUploadError(err.message || "Failed to upload Excel file");
+    } finally {
+      setExcelUploading(false);
+    }
+  };
+
   // Reset wizard
   const handleStartOver = async () => {
     setTermLoading(true);
@@ -493,6 +437,13 @@ const DashboardPage: React.FC = () => {
 
   // Ensure selectedTermId is always a string for <select> value and similar usages
   const safeSelectedTermId = selectedTermId || "";
+
+  // When entering calendar step, default year to 1
+  useEffect(() => {
+    if (step === "calendar") {
+      setSelectedCalendarYear("1");
+    }
+  }, [step]);
 
   return (
     <div style={{
@@ -825,10 +776,27 @@ const DashboardPage: React.FC = () => {
           flexDirection: "column",
           alignItems: "center"
         }}>
-          {termLoading && (!filteredDataForCalendar.filteredSchedule || !filteredDataForCalendar.filteredMap) && <div style={{padding: "20px", color: colors.orange }}>Loading calendar data...</div>}
-
-          {filteredDataForCalendar.filteredMap && (
-            <CalendarStep sectionMap={filteredDataForCalendar.filteredMap} />
+          {/* Year Filter Dropdown */}
+          <div style={{ marginBottom: 18, width: "100%", maxWidth: 350, alignSelf: 'flex-start', display: 'flex', alignItems: 'center' }}>
+            <label htmlFor="year-filter-select" style={{ fontWeight: 600, color: colors.orange, marginRight: 12, whiteSpace: 'nowrap' }}>
+              Select Year:
+            </label>
+            <select
+              id="year-filter-select"
+              value={selectedCalendarYear}
+              onChange={e => setSelectedCalendarYear(e.target.value)}
+              style={{ flexGrow: 1, padding: '8px 12px', borderRadius: 6, border: `1px solid ${colors.border}`, fontSize: 15 }}
+            >
+              {[1, 2, 3, 4].map(y => (
+                <option key={y} value={String(y)}>Year {y}</option>
+              ))}
+            </select>
+          </div>
+          {calendarLoading && <div style={{padding: "20px", color: colors.orange }}>Loading calendar data...</div>}
+          {preparedSectionMap && Object.keys(preparedSectionMap).length > 0 ? (
+            <CalendarStep sectionMap={preparedSectionMap} />
+          ) : (
+            !calendarLoading && <div style={{padding: "20px", color: colors.darkGray}}>No schedule data to display for the selected year.</div>
           )}
           <button
             onClick={handleStartOver}

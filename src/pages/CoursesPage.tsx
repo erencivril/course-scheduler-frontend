@@ -216,20 +216,28 @@ const CoursesPage: React.FC = () => {
             <div style={{ marginBottom: 8 }}><b>Year:</b> {detailsModal.course.yearLevel ?? "-"}</div>
             <div style={{ marginBottom: 8 }}><b>Theoretical Sessions:</b> {detailsModal.course.theoreticalSessions}</div>
             <div style={{ marginBottom: 8 }}><b>Laboratory Sessions:</b> {detailsModal.course.laboratorySessions}</div>
-            <div style={{ marginBottom: 8 }}><b>Description:</b> {detailsModal.course.description ?? "-"}</div>
+            <div style={{ marginBottom: 8 }}><b>Description:</b> {(() => {
+              const desc = detailsModal.course.description ?? "-";
+              const urlRegex = /^(https?:\/\/[^\s]+)$/i;
+              if (typeof desc === 'string' && urlRegex.test(desc.trim())) {
+                return <a href={desc.trim()} target="_blank" rel="noopener noreferrer">{desc.trim()}</a>;
+              }
+              return desc;
+            })()}</div>
             {detailsModal.course.prerequisites && detailsModal.course.prerequisites.length > 0 && (
               <div style={{ marginBottom: 8 }}><b>Prerequisites:</b> {detailsModal.course.prerequisites.join(", ")}</div>
             )}
             {/* Show all other fields if needed */}
-            {Object.entries(detailsModal.course).map(([key, value]) => {
-              if ([
-                "_id", "courseCode", "name", "yearLevel", "department", "theoreticalSessions", "laboratorySessions", "description", "prerequisites",
-                "maxStudentsPerSection", "isCommon", "isActive", "createdAt", "updatedAt", "__v"
-              ].includes(key)) return null;
-              return (
-                <div key={key} style={{ marginBottom: 8 }}><b>{key}:</b> {String(value)}</div>
-              );
-            })}
+            {Object.entries(detailsModal.course).map(([key, value]) =>
+              [
+                "courseCode", "name", "theoreticalSessions", "laboratorySessions", "description", "_id", "isElective", "linkedCourseCodes",
+                "maxStudentsPerSection", "yearLevel", "isCommon", "isActive", "createdAt", "updatedAt", "__v"
+              ].includes(key) ? null : (
+                <div key={key}>
+                  <strong>{key}:</strong> {String(value)}
+                </div>
+              )
+            )}
           </div>
         </div>
       )}
