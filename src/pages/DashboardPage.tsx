@@ -332,6 +332,14 @@ const DashboardPage: React.FC = () => {
     const map: SectionMap = {};
     for (const detail of calendarSections) {
       const courseFromSection = detail.course;
+      // Handle assignedLecturers as array of objects or strings
+      let lecturerNames = "";
+      if (Array.isArray(detail.assignedLecturers)) {
+        lecturerNames = detail.assignedLecturers
+          .map((l: any) => (typeof l === 'string' ? l : (l && l.name ? l.name : '')))
+          .filter(Boolean)
+          .join(', ');
+      }
       map[detail._id] = {
         _id: detail._id,
         course: {
@@ -339,7 +347,7 @@ const DashboardPage: React.FC = () => {
           name: courseFromSection?.name || 'N/A',
         },
         sectionNumber: detail.sectionNumber,
-        lecturers: (detail.assignedLecturers || []).join(', '),
+        lecturers: lecturerNames,
         detailedSessions: (detail.sessions || []).map((sess: any) => ({
           sessionId: sess._id,
           lessonType: sess.lessonType,
