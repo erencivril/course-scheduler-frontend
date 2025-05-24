@@ -2,9 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { colors } from "../theme/colors";
-import { fetchCourses, fetchTerms, fetchCourseById } from "../services/auth";
-import { postBulkSchedule } from "../services/bulkSchedule";
-import { useNavigate, useLocation } from "react-router-dom";
+import { fetchCourses } from "../services/auth";
 
 interface Course {
   _id: string;
@@ -13,23 +11,18 @@ interface Course {
   theoreticalSessions: number;
   laboratorySessions: number;
   description?: string;
+  yearLevel?: number;
+  department?: string;
+  prerequisites?: string[];
   [key: string]: any;
 }
 
 const CoursesPage: React.FC = () => {
   const [courses, setCourses] = useState<Course[]>([]);
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
-  const [seatCounts, setSeatCounts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [detailsModal, setDetailsModal] = useState<{ open: boolean; course?: Course }>({ open: false });
-  const navigate = useNavigate();
-  const location = useLocation();
-  // Expect termId to be passed via navigation state from Step 1
-  const termId = (location.state && (location.state.termId || location.state.selectedTerm)) || "";
 
   useEffect(() => {
     setLoading(true);
@@ -60,74 +53,11 @@ const CoursesPage: React.FC = () => {
     return [...se, ...other];
   }, [courses, search]);
 
-  // Validation
-  const canSubmit =
-    Object.values(selected).some(Boolean) &&
-    Object.entries(selected)
-      .filter(([id, checked]) => checked)
-      .every(([id]) => {
-        const val = seatCounts[id];
-        return val && !isNaN(Number(val)) && Number(val) > 0;
-      });
-
-  // Handlers
-  const handleSelect = (id: string, checked: boolean) => {
-    setSelected((prev) => ({ ...prev, [id]: checked }));
-    if (!checked) {
-      setSeatCounts((prev) => {
-        const copy = { ...prev };
-        delete copy[id];
-        return copy;
-      });
-    }
-  };
-
-  const handleSeatCount = (id: string, value: string) => {
-    setSeatCounts((prev) => ({ ...prev, [id]: value.replace(/\D/g, "") }));
-    if (value && Number(value) > 0) setSelected((prev) => ({ ...prev, [id]: true }));
-  };
-
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const sections = displayCourses
-        .filter((c) => selected[c._id])
-        .map((c) => ({
-          courseId: c._id,
-          seatsAvailable: Number(seatCounts[c._id]),
-        }));
-      if (sections.length === 0) {
-        setError("Select at least one course and enter seat counts.");
-        setSubmitting(false);
-        return;
-      }
-      if (!termId) {
-        setError("Missing term ID. Please start from Step 1 (Excel upload).");
-        setSubmitting(false);
-        return;
-      }
-      const dto = {
-        termId,
-        sections,
-      };
-      const result = await postBulkSchedule(dto as any);
-      setSuccess("Schedule generated successfully!");
-      setTimeout(() => {
-        navigate("/dashboard", { state: { scheduleData: result } });
-      }, 1000);
-    } catch (err: any) {
-      setError(err.message || "Failed to generate schedule.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   // Details modal
-  const openDetails = async (course: Course) => {
+  const openDetails = (course: Course) => {
     setDetailsModal({ open: true, course });
   };
+  const closeDetails = () => setDetailsModal({ open: false });
 
   return (
     <div
@@ -153,7 +83,7 @@ const CoursesPage: React.FC = () => {
           width: "100%",
         }}
       >
-        Select Courses & Set Seat Counts
+        University Courses
       </h2>
       <div style={{ marginBottom: 18, width: "100%", maxWidth: 420 }}>
         <input
@@ -183,68 +113,51 @@ const CoursesPage: React.FC = () => {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              <th style={{ padding: "12px", background: colors.lightGray, color: colors.orange, fontWeight: 700 }}>Select</th>
               <th style={{ padding: "12px", background: colors.lightGray, color: colors.orange, fontWeight: 700 }}>Course Code</th>
               <th style={{ padding: "12px", background: colors.lightGray, color: colors.orange, fontWeight: 700 }}>Name</th>
-              <th style={{ padding: "12px", background: colors.lightGray, color: colors.orange, fontWeight: 700 }}>Seats</th>
+              <th style={{ padding: "12px", background: colors.lightGray, color: colors.orange, fontWeight: 700 }}>Year</th>
+              <th style={{ padding: "12px", background: colors.lightGray, color: colors.orange, fontWeight: 700 }}>Theoretical</th>
+              <th style={{ padding: "12px", background: colors.lightGray, color: colors.orange, fontWeight: 700 }}>Lab</th>
+              <th style={{ padding: "12px", background: colors.lightGray, color: colors.orange, fontWeight: 700 }}>Description</th>
               <th style={{ padding: "12px", background: colors.lightGray, color: colors.orange, fontWeight: 700 }}>Details</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} style={{ textAlign: "center", padding: "24px", color: colors.orange }}>
+                <td colSpan={7} style={{ textAlign: "center", padding: "24px", color: colors.orange }}>
                   Loading...
                 </td>
               </tr>
             ) : displayCourses.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ textAlign: "center", padding: "24px", color: colors.darkGray }}>
+                <td colSpan={7} style={{ textAlign: "center", padding: "24px", color: colors.darkGray }}>
                   No courses found.
                 </td>
               </tr>
             ) : (
               displayCourses.map((course) => (
                 <tr key={course._id} style={{ borderBottom: `1px solid ${colors.border}` }}>
-                  <td style={{ textAlign: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={!!selected[course._id]}
-                      onChange={(e) => handleSelect(course._id, e.target.checked)}
-                    />
-                  </td>
-                  <td style={{ fontWeight: 600, color: colors.darkGray }}>{course.courseCode}</td>
-                  <td style={{ color: colors.black }}>{course.name}</td>
-                  <td>
-                    <input
-                      type="number"
-                      min={1}
-                      value={seatCounts[course._id] || ""}
-                      onChange={(e) => handleSeatCount(course._id, e.target.value)}
-                      style={{
-                        width: 80,
-                        padding: "6px 10px",
-                        borderRadius: 6,
-                        border: `1px solid ${colors.border}`,
-                        fontSize: 15,
-                      }}
-                      disabled={!selected[course._id]}
-                    />
-                  </td>
-                  <td>
+                  <td style={{ fontWeight: 600, color: colors.darkGray, padding: "8px" }}>{course.courseCode}</td>
+                  <td style={{ color: colors.black, padding: "8px" }}>{course.name}</td>
+                  <td style={{ color: colors.black, padding: "8px" }}>{course.yearLevel ?? "-"}</td>
+                  <td style={{ color: colors.black, padding: "8px" }}>{course.theoreticalSessions}</td>
+                  <td style={{ color: colors.black, padding: "8px" }}>{course.laboratorySessions}</td>
+                  <td style={{ color: colors.black, padding: "8px", maxWidth: 200, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{course.description ?? "-"}</td>
+                  <td style={{ textAlign: "center", padding: "8px" }}>
                     <button
+                      onClick={() => openDetails(course)}
                       style={{
                         background: colors.orange,
                         color: colors.white,
                         border: "none",
-                        borderRadius: "4px",
-                        padding: "4px 12px",
+                        borderRadius: 6,
+                        padding: "6px 16px",
                         fontWeight: 600,
                         cursor: "pointer",
                       }}
-                      onClick={() => openDetails(course)}
                     >
-                      View
+                      Details
                     </button>
                   </td>
                 </tr>
@@ -253,77 +166,6 @@ const CoursesPage: React.FC = () => {
           </tbody>
         </table>
       </div>
-      {/* Fixed footer submit */}
-      <div
-        style={{
-          position: "fixed",
-          left: 0,
-          bottom: 0,
-          width: "100vw",
-          background: colors.white,
-          borderTop: `2px solid ${colors.orange}`,
-          boxShadow: "0 -2px 10px rgba(0,0,0,0.05)",
-          padding: "18px 0",
-          display: "flex",
-          justifyContent: "center",
-          zIndex: 100,
-        }}
-      >
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit || submitting}
-          style={{
-            background: canSubmit ? colors.orange : colors.lightGray,
-            color: canSubmit ? colors.white : colors.darkGray,
-            border: "none",
-            borderRadius: "6px",
-            padding: "14px 48px",
-            fontWeight: 700,
-            fontSize: "18px",
-            cursor: canSubmit ? "pointer" : "not-allowed",
-            boxShadow: canSubmit ? "0 2px 8px rgba(232,119,34,0.12)" : "none",
-            opacity: submitting ? 0.7 : 1,
-            transition: "all 0.2s",
-          }}
-        >
-          {submitting ? "Submitting..." : "Submit Availability"}
-        </button>
-      </div>
-      {/* Error/Success */}
-      {error && (
-        <div
-          style={{
-            position: "fixed",
-            left: 0,
-            bottom: 70,
-            width: "100vw",
-            textAlign: "center",
-            color: colors.error,
-            fontWeight: 700,
-            fontSize: "16px",
-            zIndex: 101,
-          }}
-        >
-          {error}
-        </div>
-      )}
-      {success && (
-        <div
-          style={{
-            position: "fixed",
-            left: 0,
-            bottom: 70,
-            width: "100vw",
-            textAlign: "center",
-            color: colors.success,
-            fontWeight: 700,
-            fontSize: "16px",
-            zIndex: 101,
-          }}
-        >
-          {success}
-        </div>
-      )}
       {/* Details Modal */}
       {detailsModal.open && detailsModal.course && (
         <div
@@ -339,59 +181,59 @@ const CoursesPage: React.FC = () => {
             justifyContent: "center",
             zIndex: 1000,
           }}
-          onClick={() => setDetailsModal({ open: false })}
+          onClick={closeDetails}
         >
           <div
             style={{
               background: colors.white,
-              borderRadius: "14px",
-              padding: "32px 28px",
-              minWidth: "320px",
-              maxWidth: "400px",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+              borderRadius: 12,
+              boxShadow: "0 2px 12px #0002",
+              padding: 32,
+              minWidth: 340,
+              maxWidth: 480,
+              width: "90%",
               position: "relative",
             }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
           >
-            <h4 style={{ color: colors.orange, marginTop: 0 }}>{detailsModal.course.courseCode}</h4>
-            <div style={{ fontWeight: 600, fontSize: "18px", marginBottom: "10px" }}>{detailsModal.course.name}</div>
-            <div>
-              Theory: {detailsModal.course.theoreticalSessions} | Lab: {detailsModal.course.laboratorySessions}
-            </div>
-            {detailsModal.course.description && (
-              <div style={{ margin: "10px 0" }}>
-                <strong>Description:</strong> {detailsModal.course.description}
-              </div>
-            )}
-            {Object.entries(detailsModal.course).map(([key, value]) =>
-              ["courseCode", "name", "theoreticalSessions", "laboratorySessions", "description", "_id"].includes(key) ? null : (
-                <div key={key}>
-                  <strong>{key}:</strong> {String(value)}
-                </div>
-              )
-            )}
             <button
+              onClick={closeDetails}
               style={{
                 position: "absolute",
-                top: "12px",
-                right: "12px",
-                background: colors.error,
-                color: colors.white,
+                top: 12,
+                right: 12,
+                background: "#eee",
                 border: "none",
-                borderRadius: "50%",
-                width: "32px",
-                height: "32px",
-                fontWeight: 700,
-                fontSize: "18px",
+                borderRadius: 6,
+                padding: "4px 10px",
+                fontWeight: 600,
                 cursor: "pointer",
               }}
-              onClick={() => setDetailsModal({ open: false })}
             >
-              ×
+              Close
             </button>
+            <h3 style={{ color: colors.orange, marginBottom: 18 }}>{detailsModal.course.name} ({detailsModal.course.courseCode})</h3>
+            <div style={{ marginBottom: 8 }}><b>Year:</b> {detailsModal.course.yearLevel ?? "-"}</div>
+            <div style={{ marginBottom: 8 }}><b>Theoretical Sessions:</b> {detailsModal.course.theoreticalSessions}</div>
+            <div style={{ marginBottom: 8 }}><b>Laboratory Sessions:</b> {detailsModal.course.laboratorySessions}</div>
+            <div style={{ marginBottom: 8 }}><b>Description:</b> {detailsModal.course.description ?? "-"}</div>
+            {detailsModal.course.prerequisites && detailsModal.course.prerequisites.length > 0 && (
+              <div style={{ marginBottom: 8 }}><b>Prerequisites:</b> {detailsModal.course.prerequisites.join(", ")}</div>
+            )}
+            {/* Show all other fields if needed */}
+            {Object.entries(detailsModal.course).map(([key, value]) => {
+              if ([
+                "_id", "courseCode", "name", "yearLevel", "department", "theoreticalSessions", "laboratorySessions", "description", "prerequisites",
+                "maxStudentsPerSection", "isCommon", "isActive", "createdAt", "updatedAt", "__v"
+              ].includes(key)) return null;
+              return (
+                <div key={key} style={{ marginBottom: 8 }}><b>{key}:</b> {String(value)}</div>
+              );
+            })}
           </div>
         </div>
       )}
+      {error && <div style={{ color: colors.error, marginTop: 10 }}>{error}</div>}
     </div>
   );
 };

@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { colors } from "../theme/colors";
 // fetchSectionsByTerm exists, fetchAllUsers and fetchAllClassrooms do not yet.
-import { fetchTerms, fetchCourses, fetchSectionsByTerm, fetchSectionById } from "../services/auth"; 
+import { fetchTerms, fetchCourses, fetchSectionsByTerm, fetchSectionById, fetchSectionsByTermAndYearLevel, fetchAllSections, deleteSectionById } from "../services/auth"; 
 // Placeholder for future services:
 // import { fetchAllUsers, fetchAllClassrooms } from "../services/data"; // (if moved to a new file)
 import { postBulkSchedule, postLoadSections } from "../services/bulkSchedule";
 import type { BulkSectionDto } from "../types/BulkSectionDto";
 import CalendarStep from "./CalendarStep"; // Import CalendarStep
+import { createTerm, deleteTerm } from "../services/auth";
+import type { Term } from "../types/Term";
 
 // Placeholder types (would ideally be more robust and possibly shared)
 // These should match the actual data structures from backend or be adapted
@@ -83,16 +85,127 @@ interface BackendScheduleResultDto {
   conflicts: any[]; 
 }
 
+// Add a new TermManagementStep component
+const TermManagementStep: React.FC<{
+  terms: Term[];
+  selectedTermId: string | null;
+  onSelect: (id: string) => void;
+  onCreate: (term: { name: string; startDate: string; endDate: string }) => void;
+  onDelete: (id: string) => void;
+  loading: boolean;
+  error: string | null;
+}> = ({ terms, selectedTermId, onSelect, onCreate, onDelete, loading, error }) => {
+  // Local state for create form/modal
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState({ name: "", startDate: "", endDate: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  return (
+    <div style={{ width: "100%", maxWidth: 700, margin: "0 auto", padding: 32 }}>
+      <h2 style={{ fontSize: 28, marginBottom: 18 }}>Term Management</h2>
+      {error && <div style={{ color: "#c00", marginBottom: 12 }}>{error}</div>}
+      <button onClick={() => setShowModal(true)} style={{ marginBottom: 18 }}>+ Create Term</button>
+      <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 18 }}>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Start Date</th>
+            <th>End Date</th>
+            <th>Active</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {terms.length === 0 ? (
+            <tr><td colSpan={5} style={{ textAlign: "center", color: "#888" }}>No terms found.</td></tr>
+          ) : terms.map(term => (
+            <tr key={term._id} style={{ background: term._id === selectedTermId ? "#ffe5b4" : undefined }}>
+              <td>{term.name}</td>
+              <td>{term.startDate.slice(0, 10)}</td>
+              <td>{term.endDate.slice(0, 10)}</td>
+              <td>{term.isActive ? "Yes" : "No"}</td>
+              <td>
+                <button onClick={() => onSelect(term._id)} style={{ marginRight: 8 }}>
+                  {term._id === selectedTermId ? "Selected" : "Select"}
+                </button>
+                <button onClick={() => setDeleteId(term._id)} style={{ color: "#c00" }}>Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {/* Create Modal */}
+      {showModal && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setShowModal(false)}>
+          <div style={{ background: "#fff", padding: 32, borderRadius: 10, minWidth: 320 }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginBottom: 16 }}>Create Term</h3>
+            <form onSubmit={async e => {
+              e.preventDefault();
+              setSubmitting(true);
+              try {
+                await onCreate(form);
+                setShowModal(false);
+                setForm({ name: "", startDate: "", endDate: "" });
+              } finally {
+                setSubmitting(false);
+              }
+            }}>
+              <div style={{ marginBottom: 12 }}>
+                <label>Name<br /><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required /></label>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label>Start Date<br /><input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} required /></label>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label>End Date<br /><input type="date" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} required /></label>
+              </div>
+              <button type="submit" disabled={submitting}>{submitting ? "Creating..." : "Create"}</button>
+              <button type="button" onClick={() => setShowModal(false)} style={{ marginLeft: 12 }}>Cancel</button>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Delete Confirmation */}
+      {deleteId && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={() => setDeleteId(null)}>
+          <div style={{ background: "#fff", padding: 32, borderRadius: 10, minWidth: 320 }} onClick={e => e.stopPropagation()}>
+            <h3>Delete Term?</h3>
+            <p>Are you sure you want to delete this term?</p>
+            <button onClick={async () => { await onDelete(deleteId); setDeleteId(null); }}>Delete</button>
+            <button onClick={() => setDeleteId(null)} style={{ marginLeft: 12 }}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {loading && <div style={{ color: "#888", marginTop: 12 }}>Loading...</div>}
+    </div>
+  );
+};
+
+// Utility for localStorage key
+const DASHBOARD_STEP_KEY = 'dashboardStep';
+
+// On mount, initialize step from localStorage if present
+const getInitialStep = () => {
+  const saved = localStorage.getItem(DASHBOARD_STEP_KEY);
+  if (saved === 'term' || saved === 'excel' || saved === 'select' || saved === 'calendar') {
+    return saved;
+  }
+  return 'term';
+};
 
 const DashboardPage: React.FC = () => {
-  const [terms, setTerms] = useState<any[]>([]);
-  const [selectedTerm, setSelectedTerm] = useState<string>("");
-  const [scheduleData, setScheduleData] = useState<BackendScheduleResultDto | null>(null); // Typed scheduleData
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [terms, setTerms] = useState<Term[]>([]);
+  const [selectedTermId, setSelectedTermId] = useState<string | null>(null);
+  const [termLoading, setTermLoading] = useState(false);
+  const [termError, setTermError] = useState<string | null>(null);
 
-  // Step state: "upload" | "select" | "calendar"
-  const [step, setStep] = useState<"upload" | "select" | "calendar">("upload");
+  // Add step state: 'term' | 'excel' | 'select' | 'calendar'
+  const [step, _setStep] = useState<'term' | 'excel' | 'select' | 'calendar'>(getInitialStep());
+  const setStep = (newStep: 'term' | 'excel' | 'select' | 'calendar') => {
+    _setStep(newStep);
+    localStorage.setItem(DASHBOARD_STEP_KEY, newStep);
+  };
 
   // Excel upload state
   const [excelUploadResult, setExcelUploadResult] = useState<any>(null);
@@ -112,9 +225,23 @@ const DashboardPage: React.FC = () => {
   const [selectSubmitting, setSelectSubmitting] = useState(false);
   const [selectError, setSelectError] = useState<string | null>(null);
 
+  // Add checkedCourses state to track which courses are checked
+  const [checkedCourses, setCheckedCourses] = useState<Record<string, boolean>>({});
+
+  // Fetch terms on mount or when needed
+  useEffect(() => {
+    if (step === 'term') {
+      setTermLoading(true);
+      fetchTerms()
+        .then(setTerms)
+        .catch(e => setTermError(e.message || 'Failed to load terms'))
+        .finally(() => setTermLoading(false));
+    }
+  }, [step]);
+
   // Initial data load: terms and courses
   useEffect(() => {
-    setLoading(true);
+    setTermLoading(true);
     Promise.all([fetchTerms(), fetchCourses()])
       .then(([termsData, coursesData]) => {
         setTerms(termsData);
@@ -127,41 +254,19 @@ const DashboardPage: React.FC = () => {
           return a.courseCode.localeCompare(b.courseCode);
         });
         setCourses(sortedCourses);
-        if (termsData.length > 0) setSelectedTerm(termsData[0]._id || termsData[0].id || "");
-        setLoading(false);
+        if (termsData.length > 0) setSelectedTermId(termsData[0]._id || termsData[0].id || "");
+        setTermLoading(false);
       })
       .catch(err => {
-        setError(err.message || "Failed to load initial terms/courses");
-        setLoading(false);
+        setTermError(err.message || "Failed to load initial terms/courses");
+        setTermLoading(false);
       });
   }, []);
 
-  // Fetch detailed data when selectedTerm changes, if not already fetched for this term
-  // useEffect(() => {
-  //   if (selectedTerm && step === "calendar") {
-  //     setLoading(true);
-  //     fetchSectionsByTerm(selectedTerm)
-  //       .then((sections) => {
-  //         setFullSectionsDetails(sections);
-  //         setAllUsers([]); 
-  //         setAllClassrooms([]);
-  //       })
-  //       .catch(err => {
-  //         setError(err.message || "Failed to load detailed section data");
-  //         setFullSectionsDetails([]);
-  //         setAllUsers([]);
-  //         setAllClassrooms([]);
-  //       })
-  //       .finally(() => {
-  //         setLoading(false);
-  //       });
-  //   }
-  // }, [selectedTerm, step]);
-
-
   // Prepare sectionMap for CalendarStep
   const preparedSectionMap = useMemo<SectionMap | null>(() => {
-    if (!scheduleData || !fullSectionsDetails) { 
+    console.log("Data for preparedSectionMap (fullSectionsDetails):", JSON.stringify(fullSectionsDetails, null, 2));
+    if (!fullSectionsDetails) { 
       return null;
     }
 
@@ -195,17 +300,18 @@ const DashboardPage: React.FC = () => {
         yearLevel: courseFromSection?.yearLevel ?? courseFromSection?.year, 
       };
     }
+    console.log("Prepared Section Map for Calendar:", JSON.stringify(map, null, 2));
     return map;
-  }, [scheduleData, fullSectionsDetails, allUsers, allClassrooms]); // Removed 'courses' from dependency array as it's not directly used for courseInfo anymore
+  }, [fullSectionsDetails, allUsers, allClassrooms]);
 
   // Filter data for CalendarStep based on selectedCalendarYear
   const filteredDataForCalendar = useMemo(() => {
-    if (!scheduleData || !preparedSectionMap) {
+    if (!fullSectionsDetails || !preparedSectionMap) {
       return { filteredSchedule: null, filteredMap: null };
     }
 
     if (!selectedCalendarYear || selectedCalendarYear === "") { // "All Years"
-      return { filteredSchedule: scheduleData, filteredMap: preparedSectionMap };
+      return { filteredSchedule: fullSectionsDetails, filteredMap: preparedSectionMap };
     }
 
     const yearToFilter = parseInt(selectedCalendarYear, 10);
@@ -224,27 +330,26 @@ const DashboardPage: React.FC = () => {
       }
     }
 
-    const newFilteredScheduleAssignments = scheduleData.schedule.filter(assignment =>
-      allowedSectionIds.has(assignment.sectionId)
+    const newFilteredScheduleAssignments = fullSectionsDetails.filter(detail =>
+      allowedSectionIds.has(detail._id)
     );
 
     return {
-      filteredSchedule: { ...scheduleData, schedule: newFilteredScheduleAssignments },
+      filteredSchedule: { schedule: newFilteredScheduleAssignments },
       filteredMap: newFilteredMap,
     };
-  }, [scheduleData, preparedSectionMap, selectedCalendarYear]);
-
+  }, [fullSectionsDetails, preparedSectionMap, selectedCalendarYear]);
 
   // Excel file upload (raw file to backend)
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedTerm) return;
+    if (!file || !selectedTermId) return;
     setExcelUploading(true);
     setExcelUploadResult(null);
     setExcelUploadError(null);
-    setError(null);
+    setTermError(null);
     try {
-      const result = await postLoadSections(file, selectedTerm); // service call
+      const result = await postLoadSections(file, selectedTermId); // service call
       setExcelUploadResult(result);
       setStep("select"); // Move to next step
     } catch (err: any) {
@@ -259,11 +364,11 @@ const DashboardPage: React.FC = () => {
   const handleCourseAvailabilitySubmit = async () => {
     setSelectSubmitting(true);
     setSelectError(null);
-    setError(null);
-    setLoading(true);
+    setTermError(null);
+    setTermLoading(true);
     try {
       const selectedCourseSections = courses
-        .filter((c: any) => counts[c._id] && Number(counts[c._id]) > 0)
+        .filter((c: any) => checkedCourses[c._id] && counts[c._id] && Number(counts[c._id]) > 0)
         .map((c: any) => ({
           courseId: c._id,
           expectedStudents: Number(counts[c._id]),
@@ -272,56 +377,122 @@ const DashboardPage: React.FC = () => {
       if (selectedCourseSections.length === 0) {
         setSelectError("Please select at least one course and enter expected student numbers.");
         setSelectSubmitting(false);
-        setLoading(false);
+        setTermLoading(false);
+        return;
+      }
+
+      if (!selectedTermId) {
+        setSelectError("No term selected. Please go back and select a term.");
+        setSelectSubmitting(false);
+        setTermLoading(false);
         return;
       }
 
       const dto: BulkSectionDto = {
-        termId: selectedTerm,
+        termId: selectedTermId,
         sections: selectedCourseSections,
         defaultCapacity,
       };
-      const result = await postBulkSchedule(dto); // service call
-      setScheduleData(result);
-      setFullSectionsDetails(null); // Reset detailed data
 
-      // New: Fetch each section by ID in parallel
-      const sectionIds = (result.schedule || []).map((s: any) => s.sectionId);
-      const sectionDetails = await Promise.all(sectionIds.map((id: string) => fetchSectionById(id)));
-      setFullSectionsDetails(sectionDetails);
-      setStep("calendar"); // Move to calendar step
+      // 1. Post the courses explicitly selected in the UI (e.g., SE courses)
+      const bulkResponse = await postBulkSchedule(dto);
+      // Extract section IDs from the schedule array in the response
+      const sectionIds = Array.isArray(bulkResponse.schedule)
+        ? bulkResponse.schedule.map((s: any) => s.sectionId)
+        : [];
+      if (!Array.isArray(sectionIds) || sectionIds.length === 0) {
+        setSelectError("No sections returned from bulk schedule API.");
+        setSelectSubmitting(false);
+        setTermLoading(false);
+        return;
+      }
+      // 2. Fetch each section by ID
+      const sectionDetails = await Promise.all(
+        sectionIds.map((id: string) => fetchSectionById(id))
+      );
+      // 3. Filter to only those with sessions.length > 0
+      const sectionsWithSessions = sectionDetails.filter(
+        (section: any) => Array.isArray(section.sessions) && section.sessions.length > 0
+      );
+      setFullSectionsDetails(sectionsWithSessions);
+      setStep("calendar");
     } catch (err: any) {
       setSelectError(
         typeof err === "object" && err && "message" in err
           ? (err.message as string)
-          : "Failed to generate schedule."
+          : "Failed to generate schedule or fetch section details."
       );
     } finally {
       setSelectSubmitting(false);
-      setLoading(false);
+      setTermLoading(false);
     }
   };
   
   // Reset wizard
-  const handleStartOver = () => {
-    setStep("upload");
-    setExcelUploadResult(null);
-    setExcelUploadError(null);
-    setCounts({});
-    setSelectError(null);
-    setScheduleData(null);
-    // Reset detailed data states
-    setFullSectionsDetails(null);
-    // allUsers and allClassrooms are fetched once per term, could be kept or reset
-    // For simplicity, let's reset them if we want fresh data on next calendar view.
-    // However, if they are term-agnostic (like all users in system), no need to reset.
-    // Assuming users and classrooms are general, not term-specific for now.
-    // If they were term specific, they'd be reset and refetched by the useEffect for selectedTerm.
-    setError(null);
+  const handleStartOver = async () => {
+    setTermLoading(true);
+    try {
+      // Fetch all sections and delete each one
+      const allSections = await fetchAllSections();
+      await Promise.all(
+        allSections.map((section: any) => deleteSectionById(section._id))
+      );
+    } catch (e) {
+      // Optionally handle error (e.g., show a message)
+      console.error('Failed to delete all sections:', e);
+    } finally {
+      setTermLoading(false);
+      setStep('term');
+      localStorage.removeItem(DASHBOARD_STEP_KEY);
+      setExcelUploadResult(null);
+      setExcelUploadError(null);
+      setCounts({});
+      setSelectError(null);
+      setFullSectionsDetails(null);
+      setTermError(null);
+    }
   };
 
-  // The existing filter for SE courses is removed as Step 2 now handles all courses.
-  // The search/filter logic within Step 2's table remains.
+  // Handlers for term management
+  const handleCreateTerm = async (data: { name: string; startDate: string; endDate: string }) => {
+    setTermLoading(true);
+    setTermError(null);
+    try {
+      await createTerm(data);
+      const updated = await fetchTerms();
+      setTerms(updated);
+    } catch (e: any) {
+      setTermError(e.message || 'Failed to create term');
+    } finally {
+      setTermLoading(false);
+    }
+  };
+  const handleDeleteTerm = async (id: string) => {
+    setTermLoading(true);
+    setTermError(null);
+    try {
+      await deleteTerm(id);
+      const updated = await fetchTerms();
+      setTerms(updated);
+      if (selectedTermId === id) setSelectedTermId(null);
+    } catch (e: any) {
+      setTermError(e.message || 'Failed to delete term');
+    } finally {
+      setTermLoading(false);
+    }
+  };
+  const handleSelectTerm = (id: string) => setSelectedTermId(id);
+
+  // Stepper UI
+  const steps = [
+    { key: 'term', label: 'Term Management' },
+    { key: 'excel', label: 'Excel Upload' },
+    { key: 'select', label: 'Course Selection' },
+    { key: 'calendar', label: 'Calendar' },
+  ];
+
+  // Ensure selectedTermId is always a string for <select> value and similar usages
+  const safeSelectedTermId = selectedTermId || "";
 
   return (
     <div style={{
@@ -346,8 +517,39 @@ const DashboardPage: React.FC = () => {
       }}>
         University Course Scheduler
       </h2>
-      {/* Step 1: Excel Upload (Largely unchanged) */}
-      {step === "upload" && (
+      {/* Stepper */}
+      <div style={{ display: 'flex', justifyContent: 'center', margin: '32px 0' }}>
+        {steps.map((s, i) => (
+          <div key={s.key} style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ fontWeight: step === s.key ? 700 : 400, color: step === s.key ? '#e87722' : '#888', fontSize: 18 }}>{s.label}</div>
+            {i < steps.length - 1 && <div style={{ width: 40, height: 2, background: '#eee', margin: '0 12px' }} />}
+          </div>
+        ))}
+      </div>
+      {/* Step content */}
+      {step === 'term' && (
+        <TermManagementStep
+          terms={terms}
+          selectedTermId={selectedTermId}
+          onSelect={handleSelectTerm}
+          onCreate={handleCreateTerm}
+          onDelete={handleDeleteTerm}
+          loading={termLoading}
+          error={termError}
+        />
+      )}
+      {step === 'term' && (
+        <div style={{ textAlign: 'center', marginTop: 24 }}>
+          <button
+            onClick={() => setStep('excel')}
+            disabled={!selectedTermId || termLoading}
+            style={{ fontSize: 18, padding: '10px 32px', background: '#e87722', color: '#fff', border: 'none', borderRadius: 8, opacity: !selectedTermId ? 0.5 : 1 }}
+          >
+            Next
+          </button>
+        </div>
+      )}
+      {step === 'excel' && (
         <div style={{
           background: colors.white,
           borderRadius: "16px",
@@ -361,19 +563,20 @@ const DashboardPage: React.FC = () => {
           alignItems: "center"
         }}>
           <h3 style={{ fontSize: "22px", marginTop: 0, marginBottom: "20px", textAlign: "center" }}>Step 1: Upload Sections Excel</h3>
-          {error && <div style={{ color: "red", marginBottom: "16px" }}>{error}</div>}
+          {termError && <div style={{ color: "red", marginBottom: "16px" }}>{termError}</div>}
           <div style={{ width: "100%", marginBottom: "18px" }}>
             <label htmlFor="term-select" style={{ fontWeight: 600, marginRight: "12px" }}>Select Term:</label>
             <select
               id="term-select"
-              value={selectedTerm}
-              onChange={e => setSelectedTerm(e.target.value)}
+              value={safeSelectedTermId}
+              onChange={e => setSelectedTermId(e.target.value)}
               style={{ padding: "8px 16px", borderRadius: "6px", border: `1px solid ${colors.border}` }}
-              disabled={loading || terms.length === 0}
+              disabled={termLoading || terms.length === 0}
             >
+              <option value="" disabled>Select a term</option>
               {terms.map(term => (
-                <option key={term._id || term.id} value={term._id || term.id}>
-                  {term.name || term.termName || term._id || term.id}
+                <option key={term._id} value={term._id}>
+                  {term.name}
                 </option>
               ))}
             </select>
@@ -385,7 +588,7 @@ const DashboardPage: React.FC = () => {
               accept=".xlsx,.xls"
               onChange={handleExcelUpload}
               style={{ marginLeft: "12px" }}
-              disabled={excelUploading || loading}
+              disabled={excelUploading || termLoading}
             />
           </label>
           {excelUploading && (
@@ -411,11 +614,25 @@ const DashboardPage: React.FC = () => {
           {excelUploadError && (
             <div style={{ color: colors.error, marginTop: "10px" }}>{excelUploadError}</div>
           )}
+          {/* Back button for Excel step only */}
+          <button
+            onClick={() => setStep('term')}
+            style={{
+              marginTop: 18,
+              background: colors.white,
+              color: colors.orange,
+              border: `1.5px solid ${colors.orange}`,
+              borderRadius: "6px",
+              padding: "8px 18px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Back
+          </button>
         </div>
       )}
-
-      {/* Step 2: Course Selection (Largely unchanged, but submit button calls new handler) */}
-      {step === "select" && (
+      {step === 'select' && (
          <div
           style={{
             background: colors.white,
@@ -484,7 +701,7 @@ const DashboardPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {loading && !courses.length ? ( // Show loading only if courses aren't there yet
+                {termLoading && !courses.length ? ( // Show loading only if courses aren't there yet
                   <tr>
                     <td colSpan={4} style={{ textAlign: "center", padding: "24px", color: colors.orange }}>
                       Loading courses...
@@ -509,8 +726,10 @@ const DashboardPage: React.FC = () => {
                         <td style={{ textAlign: "center", padding: "8px" }}>
                           <input
                             type="checkbox"
-                            checked={!!counts[course._id] && Number(counts[course._id]) > 0}
+                            checked={!!checkedCourses[course._id]}
                             onChange={e => {
+                              setCheckedCourses(prev => ({ ...prev, [course._id]: e.target.checked }));
+                              // If unchecking, also clear the input value
                               if (!e.target.checked) {
                                 setCounts(prev => {
                                   const copy = { ...prev };
@@ -518,10 +737,8 @@ const DashboardPage: React.FC = () => {
                                   return copy;
                                 });
                               } else {
-                                setCounts(prev => ({
-                                  ...prev,
-                                  [course._id]: prev[course._id] || "1", // Default to 1 if checked
-                                }));
+                                // If checking, set a default value if not already set
+                                setCounts(prev => ({ ...prev, [course._id]: prev[course._id] || "" }));
                               }
                             }}
                           />
@@ -547,7 +764,7 @@ const DashboardPage: React.FC = () => {
                               fontSize: 15,
                             }}
                             // Enable input if checkbox is checked
-                            disabled={!(!!counts[course._id] && Number(counts[course._id]) >= 0)}
+                            disabled={!checkedCourses[course._id]}
                           />
                         </td>
                       </tr>
@@ -561,7 +778,7 @@ const DashboardPage: React.FC = () => {
             onClick={handleCourseAvailabilitySubmit} // Use the new handler
             disabled={
               selectSubmitting ||
-              !courses.some((c: any) => counts[c._id] && Number(counts[c._id]) > 0)
+              !courses.some((c: any) => checkedCourses[c._id] && counts[c._id] && Number(counts[c._id]) > 0)
             }
             style={{
               marginTop: 12,
@@ -596,55 +813,28 @@ const DashboardPage: React.FC = () => {
           </button>
         </div>
       )}
-
-      {/* Step 3: Calendar - Replaced with CalendarStep */}
-      {step === "calendar" && (
+      {step === 'calendar' && (
         <div style={{
-          // overflowX: "auto", // CalendarStep might handle its own scrolling/layout
           background: colors.white,
           borderRadius: "16px",
           boxShadow: "0 8px 32px rgba(0,0,0,0.10)",
-          padding: "24px 16px", // Keep padding
+          padding: "24px 16px",
           marginTop: "16px",
-          width: "100%", // Allow CalendarStep to manage its width
-          // maxWidth: "1000px", // CalendarStep might need more or less
+          width: "100%",
           display: "flex",
           flexDirection: "column",
           alignItems: "center"
         }}>
-          {/* Year Filter Dropdown */}
-          <div style={{ marginBottom: 18, width: "100%", maxWidth: 350, alignSelf: 'flex-start', display: 'flex', alignItems: 'center' }}>
-            <label htmlFor="year-filter-select" style={{ fontWeight: 600, color: colors.orange, marginRight: 12, whiteSpace: 'nowrap' }}>
-              Filter by Year:
-            </label>
-            <select
-              id="year-filter-select"
-              value={selectedCalendarYear}
-              onChange={e => setSelectedCalendarYear(e.target.value)}
-              style={{ flexGrow: 1, padding: '8px 12px', borderRadius: 6, border: `1px solid ${colors.border}`, fontSize: 15 }}
-            >
-              <option value="">All Years</option>
-              {[1, 2, 3, 4].map(y => ( // Assuming 4 years, adjust if needed
-                <option key={y} value={String(y)}>Year {y}</option>
-              ))}
-            </select>
-          </div>
-          
-          {loading && (!filteredDataForCalendar.filteredSchedule || !filteredDataForCalendar.filteredMap) && <div style={{padding: "20px", color: colors.orange }}>Loading calendar data...</div>}
+          {termLoading && (!filteredDataForCalendar.filteredSchedule || !filteredDataForCalendar.filteredMap) && <div style={{padding: "20px", color: colors.orange }}>Loading calendar data...</div>}
 
-          {filteredDataForCalendar.filteredSchedule && filteredDataForCalendar.filteredMap ? (
-            <CalendarStep
-              scheduleData={filteredDataForCalendar.filteredSchedule}
-              sectionMap={filteredDataForCalendar.filteredMap}
-            />
-          ) : (
-            !loading && <div style={{padding: "20px", color: colors.darkGray}}>No schedule data to display for the selected year or still preparing.</div>
+          {filteredDataForCalendar.filteredMap && (
+            <CalendarStep sectionMap={filteredDataForCalendar.filteredMap} />
           )}
           <button
             onClick={handleStartOver}
             style={{
               marginTop: 18,
-              background: colors.white, // Use theme color
+              background: colors.white,
               color: colors.orange,
               border: `1.5px solid ${colors.orange}`,
               borderRadius: "6px",

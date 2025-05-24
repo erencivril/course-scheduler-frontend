@@ -32,6 +32,7 @@ function compareTime(a: string, b: string) {
 const dayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const CalendarStep: React.FC<Props> = ({ sectionMap }) => {
+  console.log("CalendarStep received sectionMap:", JSON.stringify(sectionMap, null, 2));
   // 1. Flatten all sessions into a list of { day, start, end, courseCode, sectionNumber, lessonType }
   const calendarEntries = useMemo(() => {
     const entries: Array<{
