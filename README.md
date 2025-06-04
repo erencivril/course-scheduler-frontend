@@ -36,17 +36,6 @@ The system allows administrators to:
 *   **Persistent State:** The dashboard wizard's current step is saved in `localStorage`, allowing admins to return to their last position.
 *   **Error Handling:** Robust error handling and user feedback throughout the application.
 
-## Tech Stack
-
-*   **Framework/Library:** React (functional components and hooks)
-*   **Build Tool:** Vite (for fast development and optimized builds)
-*   **Language:** TypeScript (for type safety)
-*   **Styling:** Custom theme (CSS, potentially with a CSS-in-JS solution or preprocessor if used)
-*   **Excel Parsing:** SheetJS (XLSX)
-*   **State Management:** React Context API (`AuthContext`, component-level state for Dashboard)
-*   **Routing:** (Specify React Router if used, or other routing solutions)
-*   **API Communication:** Fetch API (or Axios if used) for interacting with the NestJS backend.
-
 ## Project Structure
 
 The frontend codebase is organized to promote modularity and maintainability:
