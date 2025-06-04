@@ -61,7 +61,7 @@ The frontend codebase is organized to promote modularity and maintainability:
 ## Setup and Installation
 
 1.  **Prerequisites:**
-    *   Node.js (version X.X.X or later - specify version if critical)
+    *   Node.js
     *   npm or yarn
 
 2.  **Clone the repository:**
